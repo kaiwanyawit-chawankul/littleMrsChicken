@@ -2,30 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1fa8fb">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mrs Chicken">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Happy Mrs Chicken</title>
 <style>
-  :root { --page:#effbd9; --frame:#a9a883; --restart:#7a7a55; }
+  :root { --page:#effbd9; --frame:#a9a883; --restart:#7a7a55; --m:12px; }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body { background: var(--page); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+  body { background: var(--page);
          font-family: "Trebuchet MS", "Comic Sans MS", sans-serif; overflow: hidden; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
-  #frame { width: min(96vw, calc((100vh - 64px) * 4 / 3)); aspect-ratio: 4 / 3; border: 14px solid var(--frame);
-           border-radius: 26px / 20px; background: #1fa8fb; overflow: hidden; box-shadow: 0 4px 0 rgba(0,0,0,.08); }
-  canvas { width: 100%; height: 100%; display: block; }
-  #restart { font: 700 15px inherit; font-family: inherit; color: #fff; background: var(--restart); border: 0; border-radius: 999px; padding: 8px 22px; cursor: pointer; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+           padding: max(var(--m), env(safe-area-inset-top)) max(var(--m), env(safe-area-inset-right)) max(var(--m), env(safe-area-inset-bottom)) max(var(--m), env(safe-area-inset-left)); }
+  #frame { border: 14px solid var(--frame); border-radius: 26px / 20px; background: #1fa8fb; overflow: hidden; box-shadow: 0 4px 0 rgba(0,0,0,.08); }
+  .immersive #stage { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .immersive #frame { border: 0; border-radius: 0; box-shadow: none; }
+  canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  #restart { position: fixed; z-index: 5; top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); opacity: .72;
+             font: 700 13px inherit; font-family: inherit; color: #fff; background: var(--restart); border: 0; border-radius: 999px; padding: 7px 16px; cursor: pointer; }
+  #rotate { display: none; position: fixed; z-index: 6; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+            background: rgba(0,0,0,.55); color: #fff; font: 600 14px/1 sans-serif; padding: 8px 16px; border-radius: 999px; }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display: block; } }
   #restart:active { transform: translateY(1px); }
   @media (prefers-color-scheme: dark) { :root { --page:#26301d; --frame:#6d6c52; --restart:#55553d; } }
 </style>
 </head>
 <body>
-<div id="frame"><canvas id="c"></canvas></div>
+<div id="stage"><div id="frame"><canvas id="c"></canvas></div></div>
 <button id="restart" type="button">Restart</button>
+<div id="rotate">&#8635; Rotate your phone for the best view</div>
 
 <script>
 /* ============ CONFIG: every tunable lives here ============ */
 const CONFIG = {
-  world: { w: 800, h: 600 },
+  world: { h: 600, minAspect: 4 / 3, maxAspect: 2.4 },   // height fixed; width follows the screen shape (phones in landscape are wide)
+  display: { autoFullscreen: true },                  // first tap on touch devices goes fullscreen + locks landscape
   pad: { l: 40, r: 40, t: 14, b: 26 },           // play-area padding (feet / sprite top)
   colors: {
     sky: '#1fa8fb', eggFill: '#fffaa8', eggLine: '#4b3a12',
@@ -33,7 +50,7 @@ const CONFIG = {
   },
   text: { counterFont: '700 44px "Trebuchet MS", sans-serif', hintFont: '600 22px "Trebuchet MS", sans-serif',
           hintKey: 'Press SPACE to lay eggs', hintTouch: 'Tap to lay eggs', counterDigits: 4, soundOn: 'Sound on', soundOff: 'Sound off' },
-  counter: { x: 784, y: 18, w: 160, h: 66 },   // x = right edge of the oval, w = minimum width
+  counter: { right: 16, y: 18, w: 160, h: 66 },   // right = gap from the right edge, w = minimum width
   chicken: {
     width: 110, speed: 62, stepRate: 9, bob: 4, tilt: 0.05,
     pauseMs: [400, 1500], walkDist: [60, 220], layMs: 360, layAtRatio: 0.5, laySquash: 0.16,
@@ -54,11 +71,11 @@ const CONFIG = {
       peep:  { gap: 50, layers: [{ wave: 'sine', f: [1300, 2100], dur: .12, gain: .28 }, { wave: 'sine', f: [1500, 2300], dur: .1, gain: .24, delay: .13 }] }
     }
   },
-  input: { layKeys: ['Space'], restartKeys: ['KeyR'], muteKeys: ['KeyM'] }
+  input: { layKeys: ['Space'], restartKeys: ['KeyR'], muteKeys: ['KeyM'], fullscreenKeys: ['KeyF'] }
 };
 
 /* ============ helpers ============ */
-const C = CONFIG, W = C.world.w, H = C.world.h;
+const C = CONFIG, H = C.world.h; let W = H * C.world.minAspect;
 const rnd = (a, b) => a + Math.random() * (b - a), rr = r => rnd(r[0], r[1]);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const easeOutBack = t => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
@@ -71,14 +88,26 @@ const sprite = new Image(), spriteOpen = new Image();
 
 /* ============ canvas + responsive scaling ============ */
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage'), frameEl = document.getElementById('frame');
+const immersive = () => !!document.fullscreenElement || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
 let scale = 1;
 function resize() {
+  document.body.classList.toggle('immersive', immersive());
+  const cs = getComputedStyle(stage), aw = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+        ah = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const asp = clamp(aw / ah, C.world.minAspect, C.world.maxAspect), fw = Math.min(aw, ah * asp);
+  frameEl.style.width = fw + 'px'; frameEl.style.height = fw / asp + 'px';        // frame fills the screen as far as the aspect limits allow
   const dpr = window.devicePixelRatio || 1, r = canvas.getBoundingClientRect();
-  canvas.width = Math.max(1, Math.round(r.width * dpr));
-  canvas.height = Math.max(1, Math.round(r.height * dpr));
-  scale = canvas.width / W;
+  canvas.width = Math.max(1, Math.round(r.width * dpr)); canvas.height = Math.max(1, Math.round(r.height * dpr));
+  W = H * r.width / r.height; scale = canvas.height / H;
+  if (G) keepInside();
 }
-new ResizeObserver(resize).observe(canvas);
+function keepInside() {
+  const b = bounds();
+  for (const c of G.chickens) { c.x = clamp(c.x, b.x0, b.x1); c.tx = clamp(c.tx, b.x0, b.x1); }
+  for (const e of G.eggs) e.x = Math.min(e.x, W - C.pad.r - C.egg.w);
+}
+new ResizeObserver(resize).observe(stage); addEventListener('orientationchange', resize); document.addEventListener('fullscreenchange', resize);
 
 /* ============ game state ============ */
 let G;
@@ -208,14 +237,14 @@ function drawEggEntity(e) {
 function drawCounter() {
   const k = C.counter, d = String(G.score).padStart(C.text.counterDigits, '0');
   ctx.font = C.text.counterFont; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const w = Math.max(k.w, ctx.measureText(d).width + 64), cx = k.x - w / 2, cy = k.y + k.h / 2;  // grows leftwards
+  const w = Math.max(k.w, ctx.measureText(d).width + 64), cx = W - k.right - w / 2, cy = k.y + k.h / 2;  // grows leftwards
   ctx.fillStyle = C.colors.counterBg; ctx.beginPath(); ctx.ellipse(cx, cy, w / 2, k.h / 2, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = C.colors.counterText; ctx.fillText(d, cx, cy + 3);
 }
 function drawToast() {
   if (G.toastT <= 0) return;
   ctx.globalAlpha = clamp(G.toastT / 400, 0, 1); ctx.fillStyle = C.colors.hint; ctx.font = C.text.hintFont;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(G.toast, 24, 48); ctx.globalAlpha = 1;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(G.toast, 24, H - 24); ctx.globalAlpha = 1;
 }
 const isTouch = matchMedia('(pointer: coarse)').matches;
 function drawHint() {
@@ -279,14 +308,24 @@ addEventListener('keydown', e => {
   else if (C.input.muteKeys.includes(e.code)) {
     initAudio(); muted = !muted; G.toast = muted ? C.text.soundOff : C.text.soundOn; G.toastT = C.audio.toastMs;
   } else if (C.input.restartKeys.includes(e.code)) reset();
+  else if (C.input.fullscreenKeys.includes(e.code)) toggleFullscreen();
 });
 addEventListener('keyup', e => { if (C.input.layKeys.includes(e.code)) e.preventDefault(); });
-canvas.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); layAll(); });
+canvas.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); if (isTouch) goFullscreen(); layAll(); });
+function goFullscreen() {   // needs a user gesture; Android also allows the landscape lock while fullscreen
+  const el = document.documentElement;
+  if (!C.display.autoFullscreen || immersive() || !el.requestFullscreen) return;
+  el.requestFullscreen({ navigationUI: 'hide' }).then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
+}
+function toggleFullscreen() { if (document.fullscreenElement) document.exitFullscreen(); else goFullscreen(); }
+addEventListener('contextmenu', e => e.preventDefault());
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost'))
+  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 const btn = document.getElementById('restart');
 btn.addEventListener('click', () => { reset(); btn.blur(); });
 
 const loadImg = (img, src) => new Promise(res => { img.onload = res; img.src = src; });
-Promise.all([loadImg(sprite, SPRITE_SRC), loadImg(spriteOpen, SPRITE_OPEN_SRC)]).then(() => { reset(); resize(); requestAnimationFrame(frame); });
+Promise.all([loadImg(sprite, SPRITE_SRC), loadImg(spriteOpen, SPRITE_OPEN_SRC)]).then(() => { resize(); reset(); requestAnimationFrame(frame); });
 </script>
 </body>
 </html>
